@@ -38,6 +38,9 @@ class EGoogleAnalytics extends CApplicationComponent
 	 * user tracking. 
 	 */
 	public $allowLinker = true;
+	
+	 // Домены, на которые ведет эта страница.
+	public $linkerDestination = '';
 
 	/**
 	 * @var string the new cookie path for your site. By default, Google Analytics
@@ -91,11 +94,12 @@ class EGoogleAnalytics extends CApplicationComponent
 	 */
 	public $detectTitle = true;
 	
+	
 	/**
-	 * @var string the new sample set size for Site Speed data collection. By default, Google Analytics
-	 * sets the site speed sample rate to 1%.
+	 *
+	 * @var boolean use newest version of ga, see https://developers.google.com/analytics/devguides/collection/upgrade/reference/gajs-analyticsjs.
 	 */
-	public $siteSpeedSampleRate;
+	public $useAnalyticsJs = true;
 
 	/**
 	 * @var array items purchased, multidimensional.
@@ -130,17 +134,229 @@ class EGoogleAnalytics extends CApplicationComponent
 	 * )
 	 */
 	public $transactions = array();
+	
+	/**
+	 * @var array events, multidimensional.
+ 	 *
+	 * array(
+	 * 		array(
+	 * 			'category' => 'Videos',
+	 * 			'action' => 'Play',
+	 * 			'label' => 'Gone With the Wind',
+	 * 			'value' => '60',
+	 * 			'interaction' => 'true',
+	 * 		),
+	 * )
+ 	 */
+ 	public $events = array();
+ 
+ 	/**
+	
 
 	/**
 	 * @var string CClientScript position. 
 	 */
 	public $position = CClientScript::POS_HEAD;
 
+	
+	private $_script;
+	
+	/**
+	 * initialization
+	 */
 	public function run()
 	{
 		if (!$this->account)
 			throw new CException('Google analytics account ID must be set.');
 
+		if (!$this->useAnalyticsJs)
+		{
+			$this->_generateGaJsSnippet();
+		} else {
+			$this->_generateAnalyticsJsSnippet();
+		}
+		Yii::app()->getClientScript()->registerScript('google-analytics', $this->_script, $this->position);
+		
+		$trackTrans = $ecommerce = '';
+		$transactions = $this->_addTransactions();
+		$items = $this->_addItems();
+		 // Отправка сведений о транзакции и товаре в Google Analytics.
+		if (!empty($items) || !empty($transactions))
+		{
+			if ($this->useAnalyticsJs) {
+				$ecommerce = "ga('require', 'ecommerce', 'ecommerce.js');\n"; // Загрузка плагина электронной торговли.
+			} 
+			$trackTrans = $this->useAnalyticsJs ? "ga('ecommerce:send');\n" : "_gaq.push(['_trackTrans']);\n";
+		}	
+		$events = $this->_addEvents();
+		$supplementScript = $ecommerce . $transactions . $items . $trackTrans . $events;
+		$supplementId = 'google-analytics-supplement-' . md5($supplementScript);
+		Yii::app()->getClientScript()->registerScript($supplementId, $supplementScript, $this->position);
+	}
+	
+	/**
+	 * ga.js snippet
+	 */
+	private function _generateGaJsSnippet()
+	{
+		$script = "var _gaq = _gaq || [];\n";
+		$script .= $this->_setAccount();
+		$script .= $this->_setDomainName();
+		$script .= $this->_setOrganics();
+		$script .= $this->_setCookiePath();
+		$script .= $this->_setAllowLinker();
+		
+		if (!$this->clientInfo)
+			$script .= "_gaq.push(['_setClientInfo', false]);\n";
+		if (!$this->detectFlash)
+			$script .= "_gaq.push(['_setDetectFlash', false]);\n";
+		if (!$this->detectTitle)
+			$script .= "_gaq.push(['_setDetectTitle', false]);\n";
+		
+		$script .= $this->_trackPageview();
+		$script .= $this->_baseScript();
+		$this->_script = $script;
+	}
+	
+	/**
+	 * analytics.js snippet
+	 */
+	private function _generateAnalyticsJsSnippet()
+	{
+		$script = $this->_baseScript();
+		$script .= $this->_setAccount();
+		$script .= $this->_trackPageview();
+		$script .= $this->_setLinkerDestination();
+		$this->_script = $script;
+	}
+	
+	/**
+	 * base script for Both variants
+	 */
+	private function _baseScript()
+	{
+		return $this->useAnalyticsJs ? 
+			"(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){ (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o), m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m) })(window,document,'script','//www.google-analytics.com/analytics.js','ga');\n"
+			:
+			"(function() {
+                var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+                ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+                var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+            })();";
+	}
+	
+	/**
+	 * Setting ga account
+	 */
+	private function _setAccount()
+	{
+		return $this->useAnalyticsJs ? 
+			"ga('create', '{$this->account}'" . 
+				$this->_setDomainName() .
+				$this->_setAnalyticsJsCreateString() . 
+			");\n"
+			: 
+			"_gaq.push(['_setAccount', '{$this->account}']);\n";
+	}
+	
+	/**
+	 * Setting domain name
+	 */
+	private function _setDomainName()
+	{
+		return $this->useAnalyticsJs ? ", '{$this->domainName}'" : "_gaq.push(['_setDomainName', '{$this->domainName}']);\n";
+	}
+	
+	/**
+	 * Adding Events, as falk made here https://github.com/falk/yii-google-analytics/commit/dec19fb470366542bdb047e269d56e1cddf04333
+	 */
+	private function _addEvents()
+	{
+		$events = '';
+ 		foreach ($this->events as $event) {
+ 			$event['label'] = (isset($event['label'])) ? $event['label'] : false;
+ 			$event['value'] = (isset($event['value'])) ? $event['value'] : false;
+ 			$event['interaction'] = (isset($event['interaction'])) ? $event['interaction'] : false;
+			
+			if ($this->useAnalyticsJs) {
+				$events .= "ga('send', 'event', '{$event['category']}', '{$event['action']}'";
+				if ($event['label'] !== false)
+					$events .= ", '{$event['label']}'";
+				if ($event['value'] !== false)
+					$events .= ", {$event['value']}";
+				if ($event['interaction'] !== false)
+					$events .= ", \{'nonInteraction': {$event['interaction']}\}";
+				$events .= ");\n";
+			} else {
+				$events .= "_gaq.push(['_trackEvent', '{$event['category']}', '{$event['action']}'";
+				if ($event['label'])
+					$events .= ", '{$event['label']}'";
+				if ($event['value'])
+					$events .= ", {$event['value']}";
+				if ($event['interaction'])
+					$events .= ", {$event['interaction']}";
+	 
+				$events .= "]);\n";
+			}
+ 		}
+		return $events;
+	}
+	
+	/**
+	 * id Идентификатор транзакции (обязательно). 
+	 * name Наименование товара (обязательно).
+	 * sku Код единицы складского учета.
+	 * category  // Категория или вид изделия.
+	 * price // Цена за единицу товара. 
+	 * quantity  // Количество.
+	 */
+	private function _addItems()
+	{
+		$items = '';
+		// Метод addItem должен вызываться для каждого товара в корзине покупок. cart. 
+		foreach ($this->items as $item) {
+			if ($this->useAnalyticsJs) {
+				"ga( 'ecommerce:addItem', { 'id': '{$item['orderId']}', 'name': '{$item['name']}',  'sku': '{$item['sku']}', 'category': '{$item['category']}', 'price': '{$item['price']}', 'quantity': '{$item['quantity']}' });\n";
+			} else {
+				$items .= "_gaq.push(['_addItem', '{$item['orderId']}', '{$item['sku']}', '{$item['name']}', '{$item['category']}', '{$item['price']}', '{$item['quantity']}']);\n";
+			}
+		}
+		return $items;
+	}
+	
+	/**
+	 * id // Transaction ID. Required  
+	 * affiliation // Affiliation or store name 
+	 * revenue // Общая сумма транзакции. 
+	 * shipping  // Доставка.
+	 * tax  // Налог.
+	 */
+	private function _addTransactions()
+	{
+		$transactions = '';
+		foreach ($this->transactions as $trans) {
+			if ($this->useAnalyticsJs) {
+				$transactions .= "ga('ecommerce:addTransaction', { 'id': '{$trans['orderId']}', 'affiliation': '{$trans['affiliation']}', 'revenue': '{$trans['total']}', 'shipping': '{$trans['shipping']}',  'tax': '{$trans['tax']}' });\n";
+			} else {
+				$transactions .= "_gaq.push(['_addTrans', '{$trans['orderId']}', '{$trans['affiliation']}', '{$trans['total']}', '{$trans['tax']}', '{$trans['shipping']}', '{$trans['city']}', '{$trans['state']}', '{$trans['country']}']);\n";
+			}
+		}
+		return $transactions;
+	}
+	
+	/**
+	 * TrackPageView
+	 */
+	private function _trackPageview (){
+		return $this->useAnalyticsJs ? "ga('send', 'pageview');\n" : "_gaq.push(['_trackPageview']);\n";
+	}
+
+	/**
+	 * Setting Organics , Refs and Ignore Organics
+	 * Only for ga.js
+	 */
+	private function _setOrganics()
+	{
 		$ignoredOrganics = '';
 		foreach ($this->ignoredOrganics as $keyword) {
 			$ignoredOrganics .= "_gaq.push(['_addIgnoredOrganic', '$keyword']);\n";
@@ -153,43 +369,53 @@ class EGoogleAnalytics extends CApplicationComponent
 		foreach ($this->organics as $engine => $keyword) {
 			$organics .= "_gaq.push(['_addOrganic','$engine', '$keyword']);\n";
 		}
-		$items = '';
-		foreach ($this->items as $item) {
-			$items .= "_gaq.push(['_addItem', '{$item['orderId']}', '{$item['sku']}', '{$item['name']}', '{$item['category']}', '{$item['price']}', '{$item['quantity']}']);\n";
-		}
-		$transactions = '';
-		foreach ($this->transactions as $trans) {
-			$transactions .= "_gaq.push(['_addTrans', '{$trans['orderId']}', '{$trans['affiliation']}', '{$trans['total']}', '{$trans['tax']}', '{$trans['shipping']}', '{$trans['city']}', '{$trans['state']}', '{$trans['country']}']);\n";
-		}
-		$trackTrans = '';
-		if (!empty($items) || !empty($transactions))
-			$trackTrans = "_gaq.push(['_trackTrans']);\n";
-
-		$script = "var _gaq = _gaq || [];\n";
-		$script .= "_gaq.push(['_setAccount', '{$this->account}']);\n";
-		$script .= $ignoredOrganics . $ignoredRefs . $organics;
-		$script .= "_gaq.push(['_setDomainName', '{$this->domainName}']);\n";
-		if ($this->cookiePath)
-			$script .= "_gaq.push(['_setCookiePath', '{$this->cookiePath}']);\n";
-		$script .= "_gaq.push(['_setAllowLinker', " . (($this->allowLinker) ? 'true' : 'false') . "]);\n";
-		if (!$this->clientInfo)
-			$script .= "_gaq.push(['_setClientInfo', false]);\n";
-		if (!$this->detectFlash)
-			$script .= "_gaq.push(['_setDetectFlash', false]);\n";
-		if (!$this->detectTitle)
-			$script .= "_gaq.push(['_setDetectTitle', false]);\n";
-		if ($this->siteSpeedSampleRate)
-			$script .= "_gaq.push(['_setSiteSpeedSampleRate', {$this->siteSpeedSampleRate}]);\n";
-		$script .= "_gaq.push(['_trackPageview']);\n";
-		$script .= $items . $transactions . $trackTrans;
-		$script .= "(function() {
-                var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
-                ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
-                var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
-            })();";
-
-		Yii::app()->getClientScript()->registerScript('google-analytics', $script, $this->position);
+		return $ignoredOrganics . $ignoredRefs . $organics;
 	}
-
+	
+	/**
+	 * Setting cookie path
+	 */
+	private function _setCookiePath(){
+		if ( $this->cookiePath === null )
+			return '';
+		return $this->useAnalyticsJs ? "'cookiePath': '{$this->cookiePath}'" : "_gaq.push(['_setCookiePath', '{$this->cookiePath}']);\n";
+	}
+	
+	/**
+	 * creating of analytics.js options object
+	 */
+	private function _setAnalyticsJsCreateString()
+	{
+		$array = array();
+		$this->_addNotEmpty($array,$this->_setCookiePath());
+		$this->_addNotEmpty($array,$this->_setAllowLinker());
+		return ",{" . implode(",",$array) . "}";
+	}
+	
+	/**
+	 * Setting alow Linker
+	 */
+	private function _setAllowLinker() 
+	{
+		$bool = (($this->allowLinker) ? 'true' : 'false');
+		return $this->useAnalyticsJs ?  "'allowLinker': $bool" : "_gaq.push(['_setAllowLinker', $bool]);\n";
+	}
+	
+	/**
+	 * Setting destination
+	 */
+	private function _setLinkerDestination()
+	{
+		return $this->allowLinker ? "ga('require', 'linker'); \n ga('linker:autoLink', ['{$this->linkerDestination}']);" : ''; 
+	}
+	
+	
+	private function _addNotEmpty(&$array, $value)
+	{
+		if ( trim($value) != '' )
+		{
+			$array[] = $value;
+		}
+	}
+	
 }
-
