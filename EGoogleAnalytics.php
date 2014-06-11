@@ -52,12 +52,6 @@ class EGoogleAnalytics extends CApplicationComponent
 	 */
 	public $domainName = 'auto';
 
-    /**
-     * @var boolean controls whether to use the new analytics.js  method (true) or the old ga.js method (false, default)
-     *
-     */
-    public $universalAnalytics = false;
-
 	/**
 	 * @var array strings of ignored term(s) for Keywords reports.
 	 * 
@@ -147,71 +141,52 @@ class EGoogleAnalytics extends CApplicationComponent
 		if (!$this->account)
 			throw new CException('Google analytics account ID must be set.');
 
+		$ignoredOrganics = '';
+		foreach ($this->ignoredOrganics as $keyword) {
+			$ignoredOrganics .= "_gaq.push(['_addIgnoredOrganic', '$keyword']);\n";
+		}
+		$ignoredRefs = '';
+		foreach ($this->ignoredRefs as $referrer) {
+			$ignoredRefs .= "_gaq.push(['_addIgnoredRef', '$referrer']);\n";
+		}
+		$organics = '';
+		foreach ($this->organics as $engine => $keyword) {
+			$organics .= "_gaq.push(['_addOrganic','$engine', '$keyword']);\n";
+		}
+		$items = '';
+		foreach ($this->items as $item) {
+			$items .= "_gaq.push(['_addItem', '{$item['orderId']}', '{$item['sku']}', '{$item['name']}', '{$item['category']}', '{$item['price']}', '{$item['quantity']}']);\n";
+		}
+		$transactions = '';
+		foreach ($this->transactions as $trans) {
+			$transactions .= "_gaq.push(['_addTrans', '{$trans['orderId']}', '{$trans['affiliation']}', '{$trans['total']}', '{$trans['tax']}', '{$trans['shipping']}', '{$trans['city']}', '{$trans['state']}', '{$trans['country']}']);\n";
+		}
+		$trackTrans = '';
+		if (!empty($items) || !empty($transactions))
+			$trackTrans = "_gaq.push(['_trackTrans']);\n";
 
-        if ($this->universalAnalytics) {
-            if (!$this->domainName)
-                throw new CException('Google analytics domain must be set (can be auto).');
-
-
-            $script = "(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
-
-ga('create', '{$this->account}', '{$this->domainName}');
-ga('send', 'pageview');";
-
-        } else {
-
-            $ignoredOrganics = '';
-            foreach ($this->ignoredOrganics as $keyword) {
-                $ignoredOrganics .= "_gaq.push(['_addIgnoredOrganic', '$keyword']);\n";
-            }
-            $ignoredRefs = '';
-            foreach ($this->ignoredRefs as $referrer) {
-                $ignoredRefs .= "_gaq.push(['_addIgnoredRef', '$referrer']);\n";
-            }
-            $organics = '';
-            foreach ($this->organics as $engine => $keyword) {
-                $organics .= "_gaq.push(['_addOrganic','$engine', '$keyword']);\n";
-            }
-            $items = '';
-            foreach ($this->items as $item) {
-                $items .= "_gaq.push(['_addItem', '{$item['orderId']}', '{$item['sku']}', '{$item['name']}', '{$item['category']}', '{$item['price']}', '{$item['quantity']}']);\n";
-            }
-            $transactions = '';
-            foreach ($this->transactions as $trans) {
-                $transactions .= "_gaq.push(['_addTrans', '{$trans['orderId']}', '{$trans['affiliation']}', '{$trans['total']}', '{$trans['tax']}', '{$trans['shipping']}', '{$trans['city']}', '{$trans['state']}', '{$trans['country']}']);\n";
-            }
-            $trackTrans = '';
-            if (!empty($items) || !empty($transactions))
-                $trackTrans = "_gaq.push(['_trackTrans']);\n";
-
-            $script = "var _gaq = _gaq || [];\n";
-            $script .= "_gaq.push(['_setAccount', '{$this->account}']);\n";
-            $script .= $ignoredOrganics . $ignoredRefs . $organics;
-            $script .= "_gaq.push(['_setDomainName', '{$this->domainName}']);\n";
-            if ($this->cookiePath)
-                $script .= "_gaq.push(['_setCookiePath', '{$this->cookiePath}']);\n";
-            $script .= "_gaq.push(['_setAllowLinker', " . (($this->allowLinker) ? 'true' : 'false') . "]);\n";
-            if (!$this->clientInfo)
-                $script .= "_gaq.push(['_setClientInfo', false]);\n";
-            if (!$this->detectFlash)
-                $script .= "_gaq.push(['_setDetectFlash', false]);\n";
-            if (!$this->detectTitle)
-                $script .= "_gaq.push(['_setDetectTitle', false]);\n";
-            if ($this->siteSpeedSampleRate)
-                $script .= "_gaq.push(['_setSiteSpeedSampleRate', {$this->siteSpeedSampleRate}]);\n";
-            $script .= "_gaq.push(['_trackPageview']);\n";
-            $script .= $items . $transactions . $trackTrans;
-            $script .= "(function() {
-                    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
-                    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
-                    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
-                })();";
-
-        }
-
+		$script = "var _gaq = _gaq || [];\n";
+		$script .= "_gaq.push(['_setAccount', '{$this->account}']);\n";
+		$script .= $ignoredOrganics . $ignoredRefs . $organics;
+		$script .= "_gaq.push(['_setDomainName', '{$this->domainName}']);\n";
+		if ($this->cookiePath)
+			$script .= "_gaq.push(['_setCookiePath', '{$this->cookiePath}']);\n";
+		$script .= "_gaq.push(['_setAllowLinker', " . (($this->allowLinker) ? 'true' : 'false') . "]);\n";
+		if (!$this->clientInfo)
+			$script .= "_gaq.push(['_setClientInfo', false]);\n";
+		if (!$this->detectFlash)
+			$script .= "_gaq.push(['_setDetectFlash', false]);\n";
+		if (!$this->detectTitle)
+			$script .= "_gaq.push(['_setDetectTitle', false]);\n";
+		if ($this->siteSpeedSampleRate)
+			$script .= "_gaq.push(['_setSiteSpeedSampleRate', {$this->siteSpeedSampleRate}]);\n";
+		$script .= "_gaq.push(['_trackPageview']);\n";
+		$script .= $items . $transactions . $trackTrans;
+		$script .= "(function() {
+                var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+                ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+                var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+            })();";
 
 		Yii::app()->getClientScript()->registerScript('google-analytics', $script, $this->position);
 	}
